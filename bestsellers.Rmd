@@ -1,0 +1,208 @@
+---
+title: "Exploring NYT bestsellers" 
+author: "Rachel Liu"
+output: 
+  github_document:
+    toc: true
+---
+
+## Load necessary libraries
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(readr)
+library(here)
+library(lubridate)
+library(ggrepel)
+library(knitr)
+```
+
+## Import NYT Bestseller data
+
+```{r import, message=FALSE}
+bestsellers <- read_csv(here("bestsellers.csv"))
+```
+
+## Clean and recode data as necessary
+
+While cleaning our data, it's important to realize that since our data is of all bestsellers per week, it will have duplicates if the bestsellers have a longevity of longer than a week, which will skew our patterns substantially. Let's first filter out duplicates, clean out data, and recode some relevant columns.
+
+```{r clean}
+# select only relevant cols and recode published-date to convey year and month info separately
+
+bestsellers %<>% 
+  distinct(title, .keep_all = TRUE) %>%
+  select(-list_name_encoded, -amazon_product_url, -isbn13, -isbn10) %>% 
+  mutate(
+    year = year(ymd(published_date)),
+    month = month(ymd(published_date))
+  )
+
+```
+
+
+
+## Introduction
+
+### Background
+
+For the average person, the [New York Times' bestsellers list](https://www.nytimes.com/books/best-sellers/), as a measure of prestige and a testament to the quality of a certain book, is a sign that a book has made it to the big leagues. On the list, both the longevity of a book on the list (the length, in weeks, during which it is on the list) and its rank are some quantitative ways to measure the success of a book. (This is not to say that the NYT Bestseller's list is the end all be all measure of success: publishing, old-school as it is, uses some questionable and [convoluted](https://www.vox.com/culture/2017/9/13/16257084/bestseller-lists-explained) methods for measuring the concept of "best-selling.") I will be focusing this report on longevity in particular as a measure of overall, long-term success. How do certain factors affect the longevity of a book staying on the bestsellers list?
+
+### Objective: 
+
+Investigate the relationship between the longevity of a book on a bestsellers list and various factors such as genre, publication month/year, or previous bestseller experience (at least one other bestseller published by the same author).
+
+## Explore the Data
+
+Let's first visualize list longevity to get a sense of the dataset.
+
+### List Longevity by count
+
+```{r longevity}
+
+# Plot list Longevity by count for all bestsellers
+
+bestsellers %>%
+  group_by(weeks_on_list) %>% 
+  mutate(count = n()) %>% 
+  ggplot(aes(x = weeks_on_list, y = count)) +
+  geom_point(color = if_else(bestsellers$weeks_on_list > 200, "purple", "black")) +
+  # use ggrepel and if_else() to make outlier labels of titles clearer
+  geom_text_repel(
+    aes(label = if_else(weeks_on_list > 200, str_to_title(title),'')),
+    min.segment.length = 0,
+    nudge_y = 2,
+    size = 2.5,
+    segment.size = 0.2) +
+  # expand to make space for labels
+  scale_x_continuous(expand = expansion(mult = 0.1)) +
+  labs(
+    x = "List Longevity (in weeks)",
+    y = "Count",
+    title = "List longevity count for all bestsellers",
+    subtitle = "Data from the New York Times Bestsellers List (2010-2019)"
+  )
+
+```
+
+From this scatter plot, we can see that the list longevity of bestsellers tends to cluster towards the shorter side (there's a very high count of > 4000 at the 1 week mark) and count decreases exponentially as list longevity increases. This makes sense: thinking logically, it's less likely for books to do really well consistently and more likely for a lot of books to be on the bestsellers list for only the single week that their sales are highest. Trends fade; only a few books become "classics." Thus, as list longevity increases, the number of bestsellers with that list longevity decreases. 
+
+But what's going on with those purple points in the 200+ weeks? Turns out, they're not errors, they just represent really popular books. Although we might be tempted to dismiss these points and remove them, we won't.  Because *Harry Potter*, *What To Expect When You're Expecting*, *Magic Tree House,* *The Devil in the White City*, and *The Alchemist* are all natural parts of the population of bestselling books that we're studying, not aberrations. Plus, the *Magic Tree House* is terrific.
+
+N.B.: Although they may look it, these points technically are not outliers (that is, they're not the *only* outliers). Because of how heavily skewed the dataset is, I will not be showing all outliers as such for weeks_on_list. The kable below shows the summary statistics and how the 1.5 * IQR rule would not suit our purposes for recognizing outliers, since it would limit the data to a minimum range of 1 and a maximum range of 1, effectively marking all bestsellers that have stayed on the list for longer than a single week as outliers. 
+
+```{r kable of longevity}
+
+# summarize and print as kable
+
+bestsellers %>%
+  summarize(
+    min = min(weeks_on_list),
+    first_quartile = quantile(weeks_on_list, 0.25),
+    third_quartile = quantile(weeks_on_list, 0.75),
+    IQR = third_quartile - first_quartile,
+    IQR_rule = 1.5 * IQR,
+    min_range = first_quartile - IQR_rule,
+    max_range = third_quartile + IQR_rule,
+    mean = mean(weeks_on_list),
+    max = max(weeks_on_list)
+  ) %>% 
+  kable(caption = "Summary statistics for bestsellers' longevity (weeks_on_list)")
+
+```
+
+### List Longevity and Publication Year:
+
+Something that may impact list longevity is publication year, which may change a book's popularity due to yearly trends in topics, genres, and industry standards. 
+
+```{r longevity and pub year, message=FALSE}
+
+# mutate year variable into factor, group by year and longevity, plot as histogram
+
+bestsellers %>%
+  mutate(across(contains("year"),as.factor)) %>% 
+  group_by(year, weeks_on_list) %>%
+  summarize(count = n()) %>%
+  ggplot(aes(x = weeks_on_list, fill = year)) +
+  geom_histogram() +
+  labs(
+    x = "List Longevity (in weeks)",
+    y = "Count",
+    title = "List longevity count, color-coded by publication year",
+    subtitle = "Data from the New York Times Bestsellers List (2010-2019)"
+  )
+
+```
+
+In the stacked bar chart above, we see the list longevity count color-coded by year. We can see that while the distrbution of lower number longevities seems pretty much evenly distributed across all years, some specific years dominate the bar chart as list longevity increases. Beyond the 50 week mark, there are few bestsellers from 2017-2019. 2010, in particular, seemed like a great time for bestsellers, with longevities beyond the 100 week mark. Even the bar with the longest list longevity at 400+, which we know from the first scatter plot represents "What to Expect When You're Expecting," was published in 2010. 
+
+Another that may be affecting list longevity is the general decreased interest in print publishing from 2010-2019. [According to Gallup](https://news.gallup.com/poll/388541/americans-reading-fewer-books-past.aspx), Americans read fewer books per year than they did from 2001 and 2016. Nowadays, popular self help and health books like "What to Expect When You're Expecting" is available online in the form of WebMD or Healthline. This may explain the smaller amount of books after 2016 that have a list longevity of more than 50 weeks.
+
+
+### List Longevity and Previous Experience with a Bestseller:
+
+One of the most obvious factors that seems like it might impact how successful a bestseller is is if the author has had previous bestsellers. Let's check to see if this holds true.
+
+```{r longevity and experience}
+
+# Mutate new categorical variable for bestseller experience and plot in a frequency polygon
+
+bestsellers %>%
+  group_by(author) %>%
+  mutate(repeated_author = if_else(n() > 1, TRUE, FALSE)) %>%
+  ggplot(aes(x = weeks_on_list, color = repeated_author)) +
+  geom_freqpoly() +
+  labs(
+    x = "List longevity (in weeks)",
+    y = "Count",
+    title = "List Longevity by whether or not authors have previous bestsellers",
+    subtitle = "Data from the New York Times Bestsellers List (2010-2019)"
+  ) +
+  scale_color_discrete(name = "Does author have previous bestseller?", labels = c("No", "Yes"))
+
+```
+
+From the frequency polygon chart above, it seems like a bigger proportion of authors who land a book onto the NYT bestsellers list are, in fact, authors who have had at least one previous bestseller. For books with longevity around 1-20 weeks, a bigger proportion of authors have had previous bestseller experience as opposed to those without (~3800 books vs. 2500 books). 
+
+This makes sense. Publishing is a tightly gate-kept field with a lot of standardized, unspoken conventions. To get a best seller, published authors have to get their books to editors at the big five publishing houses (Penguin Random House, Macmillan, etc.) through agents, who reject far more manuscripts than they sign on. Apart from obvious quality differences, editors and agents usually pitch a manuscript with author platform and experience in mind, assuming that previous successful authors will be successful in the future. I call this the James Patterson effect. 
+
+(**Fun Fact**: The NYT bestsellers list? More like the James Patterson books list. In a [bar chart](https://github.com/rfordatascience/tidytuesday/blob/master/data/2022/2022-05-10/pic1.png) made from the same dataset by data scientist [Kailey Smith](https://towardsdatascience.com/finding-trends-in-ny-times-best-sellers-55cdd891c8aa) of most popular bestseller books by author, James Patterson reigns supreme.)
+
+### List Longevity and Genre:
+
+Another factor that may potentially impact the list longevity is a book's genre. This is a no brainer: certain, more "evergreen" genres probably tend to do better in terms of longevity than trendier or newer book genres. But which ones are which?
+
+```{r longevity and genre}
+
+# Obtain overage list longevity by genre 
+
+longevity_by_genre <- bestsellers %>% 
+  group_by(list_name) %>% 
+  summarize(mean_longev = mean(weeks_on_list)) %>% 
+  filter(mean_longev != 0) 
+
+# Bind highest and lowest longevity together and plot 
+  bind_rows(
+    max = slice_max(.data = longevity_by_genre, order_by = mean_longev, n = 10),
+    min = slice_min(.data = longevity_by_genre, order_by = mean_longev, n = 10),
+    .id = "type"
+  ) %>% 
+  ggplot(aes(x = fct_reorder(list_name, mean_longev), y = mean_longev, fill = type)) +
+  geom_col() +
+  theme(legend.position = "none") +
+  coord_flip() +
+  labs(
+    x = "Genre",
+    y = "Average longevity of books (in weeks)",
+    title = "10 Genres with the Highest and Lowest List Longevity",
+    subtitle = "Data from the New York Times Bestsellers List (2010-2019)"
+  ) 
+  
+```
+
+Lastly, I examined how genre might be correlated with a book's list longevity. For the bar chart above, I plotted the 10 genres with the highest and lowest average list longevity. Paperback nonfiction, series books, and advice books have higher longevities, while ebooks hardcovers, and manga have lower longevities. In general, it seems that paperback books have longer longevity than hardcovers or ebooks, and established genres like nonfiction, advice, and fiction sell more than smaller markets like children's middle grade or young adult, which are written with a specific audience in mind. Because of the fact that book with a wider audience appeal might gain more momentum and popularity once they get on the list (whereas books with smaller target audiences can't reach more people that they're not targeting even once they get on the list), it might make sense that books with wider audience appeal are the ones that stay longer on the bestsellers list.
+
+## Summary 
+Thus, it seems that some factors that *are* correlated with a higher list longevity on the NYT bestsellers list include publishing in the early 2010s, having previous bestseller experience as an author, publishing your book as paperback over hardcover or ebooks, or writing in certain genres such as nonfiction, series, and advice over more niche genres. It might be interesting to see whether or not these patterns correspond to insider industry knowledge, and whether or not an aspiring author would be able to "game the system," for lack of a better word. 
+
+
